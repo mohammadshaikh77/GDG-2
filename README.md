@@ -107,3 +107,16 @@ python3 run.py --exp 5 --source_root ./results
 - Random-seed conventions and extraction rules are centralized in `CONTEXT.md`.
 - Shared metric implementations are in `src/metrics.py`.
 - For experiment-specific requirements and expected outputs, follow the matching `docs/expN_*.md` file.
+
+## Smoke validation evidence
+
+This repository includes a lightweight smoke run under `results/smoke/` and `plots/smoke/` to provide visible proof that the pipeline executes end-to-end.
+
+- Training produced a checkpoint and CSV log.
+- Measurement produced NPZ metrics.
+- Plotting generated PDF outputs.
+
+See:
+- `results/smoke/README.md`
+- `results/smoke/ANALYSIS.md`
+- `WORKLOG.md`
