@@ -1,5 +1,9 @@
 __pycache__/
 *.pyc
 data/
-results/
-plots/
+results/*
+!results/smoke/
+!results/smoke/**
+plots/*
+!plots/smoke/
+!plots/smoke/**
