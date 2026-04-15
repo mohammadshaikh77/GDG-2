@@ -33,6 +33,15 @@ This file tracks hands-on implementation and debugging steps performed in this r
 - Added ignore strategy for heavy/generated assets.
 - Committed lightweight smoke artifacts under `results/smoke` and `plots/smoke` as visible proof of execution.
 
+### 6) Experiment 5 implementation completed
+- Implemented position-stratified cosine metrics in `measure.py`.
+- Extended model forward path to optionally return attention weights for analysis mode.
+- Added attention-entropy extraction per layer and token position in `measure.py`.
+- Implemented `plot_exp5(...)` visualizations for:
+  - group-wise cosine vs layer,
+  - per-position cosine profile,
+  - attention entropy vs token position.
+- Re-ran smoke measurement and plotting; exp5 now saves 3 plots successfully.
+
 ## Next planned work
-- Implement full Experiment 5 measurement path (position-group cosine + attention entropy extraction support).
 - Add minimal test coverage for metric keys and expected output shape contracts.

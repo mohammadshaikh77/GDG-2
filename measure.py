@@ -162,6 +162,17 @@ def compute_exp5_position_metrics(residual_states_raw: List[torch.Tensor]) -> Di
     }
 
 
+def compute_attention_entropy(attention_weights: List[torch.Tensor]) -> np.ndarray:
+    """Returns mean attention entropy by (layer, position), averaged over batch and heads."""
+    entropy_by_layer: List[np.ndarray] = []
+    for layer_attn in attention_weights:
+        probs = layer_attn.detach().cpu().float().clamp(min=1e-12)
+        entropy = -(probs * torch.log(probs)).sum(dim=-1)
+        mean_entropy = entropy.mean(dim=(0, 1))
+        entropy_by_layer.append(mean_entropy.numpy().astype(np.float32, copy=False))
+    return np.stack(entropy_by_layer, axis=0)
+
+
 def aggregate_metric_dicts(metric_dicts: List[dict]) -> Dict[str, np.ndarray]:
     """Returns stacked numpy arrays for a list of metric dictionaries."""
     aggregated: Dict[str, List[np.ndarray]] = {}
@@ -248,7 +259,15 @@ def measure(args: argparse.Namespace) -> None:
     x = get_sequential_chunks(val_chunks, start=0, n=n_sequences, device=str(device))
 
     with torch.no_grad():
-        logits, hidden_states = model(x, extract_hidden_states=True)
+        if args.exp_name.startswith("exp5"):
+            logits, hidden_states, attention_weights = model(
+                x,
+                extract_hidden_states=True,
+                return_attn_weights=True,
+            )
+        else:
+            logits, hidden_states = model(x, extract_hidden_states=True)
+            attention_weights = []
     del logits
 
     centered_hidden_states = [flatten_and_center(state) for state in hidden_states]
@@ -320,6 +339,7 @@ def measure(args: argparse.Namespace) -> None:
 
     if args.exp_name.startswith("exp5"):
         results.update(compute_exp5_position_metrics(residual_states_raw))
+        results["attention_entropy"] = compute_attention_entropy(attention_weights)
 
     output_path = make_output_path(args.out_dir, args.exp_name, args.seed, int(checkpoint["step"]))
     np.savez(output_path, **results)

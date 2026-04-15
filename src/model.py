@@ -47,8 +47,12 @@ class CausalSelfAttention(nn.Module):
         mask = torch.tril(torch.ones(config.block_size, config.block_size))
         self.register_buffer("causal_mask", mask.view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Returns the attention output tensor of shape (batch, seq_len, n_embd)."""
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_attn_weights: bool = False,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Returns attention output and optionally attention weights of shape (batch, heads, seq_len, seq_len)."""
         batch_size, seq_len, channels = x.shape
 
         qkv = self.c_attn(x)
@@ -67,6 +71,8 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, channels)
         y = self.c_proj(y)
         y = self.resid_dropout(y)
+        if return_attn_weights:
+            return y, att
         return y
 
 
@@ -107,20 +113,36 @@ class Block(nn.Module):
         self,
         x: torch.Tensor,
         extract_hidden_states: bool = False,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
+        return_attn_weights: bool = False,
+    ) -> Union[
+        torch.Tensor,
+        Tuple[torch.Tensor, List[torch.Tensor]],
+        Tuple[torch.Tensor, torch.Tensor],
+        Tuple[torch.Tensor, List[torch.Tensor], torch.Tensor],
+    ]:
         """Returns the block output, and optionally the five experiment extraction tensors."""
         if not extract_hidden_states:
-            attn_out = self.attn(self.ln_1(x))
+            if return_attn_weights:
+                attn_out, attn_weights = self.attn(self.ln_1(x), return_attn_weights=True)
+            else:
+                attn_out = self.attn(self.ln_1(x))
             x = x + self.residual_alpha * attn_out
             mlp_out = self.mlp(self.ln_2(x))
             x = x + self.residual_alpha * mlp_out
+            if return_attn_weights:
+                return x, attn_weights
             return x
 
         h_l = x
-        a_l = self.attn(self.ln_1(h_l))
+        if return_attn_weights:
+            a_l, attn_weights = self.attn(self.ln_1(h_l), return_attn_weights=True)
+        else:
+            a_l = self.attn(self.ln_1(h_l))
         r_l = h_l + self.residual_alpha * a_l
         m_l = self.mlp(self.ln_2(r_l))
         h_next = r_l + self.residual_alpha * m_l
+        if return_attn_weights:
+            return h_next, [h_l, a_l, r_l, m_l, h_next], attn_weights
         return h_next, [h_l, a_l, r_l, m_l, h_next]
 
 
@@ -155,7 +177,13 @@ class GPT(nn.Module):
         self,
         idx: torch.Tensor,
         extract_hidden_states: bool = False,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
+        return_attn_weights: bool = False,
+    ) -> Union[
+        torch.Tensor,
+        Tuple[torch.Tensor, List[torch.Tensor]],
+        Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]],
+        Tuple[torch.Tensor, List[torch.Tensor]],
+    ]:
         """Returns logits, and optionally the ordered hidden-state extraction list."""
         batch_size, seq_len = idx.shape
         if seq_len > self.config.block_size:
@@ -169,19 +197,33 @@ class GPT(nn.Module):
         x = self.drop(tok_emb + pos_emb)
 
         if not extract_hidden_states:
+            attn_weights_all: List[torch.Tensor] = []
             for block in self.blocks:
-                x = block(x, extract_hidden_states=False)
+                if return_attn_weights:
+                    x, attn_weights = block(x, extract_hidden_states=False, return_attn_weights=True)
+                    attn_weights_all.append(attn_weights)
+                else:
+                    x = block(x, extract_hidden_states=False)
             x = self.ln_f(x)
             logits = self.lm_head(x)
+            if return_attn_weights:
+                return logits, attn_weights_all
             return logits
 
         hidden_states: List[torch.Tensor] = [x]
+        attn_weights_all: List[torch.Tensor] = []
         for block in self.blocks:
-            x, block_states = block(x, extract_hidden_states=True)
+            if return_attn_weights:
+                x, block_states, attn_weights = block(x, extract_hidden_states=True, return_attn_weights=True)
+                attn_weights_all.append(attn_weights)
+            else:
+                x, block_states = block(x, extract_hidden_states=True)
             hidden_states.extend(block_states)
 
         x = self.ln_f(x)
         logits = self.lm_head(x)
+        if return_attn_weights:
+            return logits, hidden_states, attn_weights_all
         return logits, hidden_states
 
 

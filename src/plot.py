@@ -858,6 +858,26 @@ def plot_exp5(records: Sequence[dict], out_dir: str, fmt: str) -> int:
     save_figure(fig, out_dir, "exp5", 2, "position_profile", fmt)
     saved += 1
 
+    entropy_values = stack_metric(grouped[variant][final_step], "attention_entropy")
+    entropy_mean = entropy_values.mean(axis=0)
+    x_positions = np.arange(entropy_mean.shape[1], dtype=np.int64)
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    for layer_idx in range(entropy_mean.shape[0]):
+        ax.plot(
+            x_positions,
+            entropy_mean[layer_idx],
+            linewidth=2,
+            color=colors[layer_idx % len(colors)],
+            label=f"layer {layer_idx + 1}",
+        )
+    ax.set_title("Attention Entropy vs Token Position")
+    ax.set_xlabel("Token position")
+    ax.set_ylabel("Attention entropy")
+    ax.legend(ncol=2)
+    save_figure(fig, out_dir, "exp5", 3, "attention_entropy_vs_position", fmt)
+    saved += 1
+
     return saved
 
 
