@@ -115,6 +115,7 @@ This repository includes a lightweight smoke run under `results/smoke/` and `plo
 - Training produced a checkpoint and CSV log.
 - Measurement produced NPZ metrics.
 - Plotting generated PDF outputs.
+- Experiment 5 smoke artifacts are also included for position-stratified cosine diagnostics.
 
 See:
 - `results/smoke/README.md`

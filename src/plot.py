@@ -808,13 +808,57 @@ def plot_exp4(records: Sequence[dict], out_dir: str, fmt: str) -> int:
 
 def plot_exp5(records: Sequence[dict], out_dir: str, fmt: str) -> int:
     """Returns the number of saved plots for experiment 5."""
-    del records
-    del out_dir
-    del fmt
-    raise ValueError(
-        "Experiment 5 plots require position-group cosine and attention-entropy metrics, "
-        "but the current measurement files do not contain those arrays."
+    saved = 0
+    grouped = group_records_by_variant_and_step(records)
+    variant = "diagnostic"
+    if variant not in grouped:
+        variant = sorted(grouped.keys())[0]
+    available_steps = sorted(grouped[variant].keys())
+    final_step = available_steps[-1]
+
+    layer_values = stack_metric(grouped[variant][final_step], "mean_cosine_by_group")
+    labels_array = grouped[variant][final_step][0]["metrics"]["position_group_labels"]
+    group_labels = [str(label) for label in np.asarray(labels_array).tolist()]
+    layers = np.arange(layer_values.shape[1], dtype=np.int64)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    colors = plt.get_cmap("tab10").colors
+    for group_idx, label in enumerate(group_labels):
+        values = layer_values[:, :, group_idx]
+        mean = values.mean(axis=0)
+        std = values.std(axis=0)
+        make_line_band_plot(ax, layers, mean, std, colors[group_idx % len(colors)], label)
+    ax.set_title("Mean Cosine Similarity by Position Group vs Layer")
+    ax.set_xlabel("Layer index")
+    ax.set_ylabel("Mean cosine similarity")
+    ax.legend()
+    save_figure(fig, out_dir, "exp5", 1, "mean_cosine_group_vs_layer", fmt)
+    saved += 1
+
+    position_values = stack_metric(grouped[variant][final_step], "mean_cosine_by_position")
+    layer_for_profile = 1 if position_values.shape[1] > 1 else 0
+    profile = position_values[:, layer_for_profile, :]
+    profile_mean = profile.mean(axis=0)
+    profile_std = profile.std(axis=0)
+    x_positions = np.arange(profile.shape[1], dtype=np.int64)
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    make_line_band_plot(
+        ax,
+        x_positions,
+        profile_mean,
+        profile_std,
+        colors[0],
+        f"layer {layer_for_profile}",
     )
+    ax.set_title("Per-Position Mean Cosine Profile")
+    ax.set_xlabel("Token position")
+    ax.set_ylabel("Mean cosine similarity")
+    ax.legend()
+    save_figure(fig, out_dir, "exp5", 2, "position_profile", fmt)
+    saved += 1
+
+    return saved
 
 
 def plot_exp6(records: Sequence[dict], results_dir: str, out_dir: str, fmt: str) -> int:

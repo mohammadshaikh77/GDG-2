@@ -12,12 +12,19 @@ import torch
 import torch.nn as nn
 
 from src.data import get_sequential_chunks, load_wikitext103
-from src.metrics import compute_all_metrics, erank, linear_CKA
+from src.metrics import compute_all_metrics, erank, linear_CKA, mean_cosine_sim
 from src.model import GPT, GPTConfig
 
 
 CKA_SUBSAMPLE = 4096
 CKA_SEED = 42
+EXP5_COSINE_PAIRS = 1000
+EXP5_POSITION_GROUPS = [
+    ("early", 0, 32),
+    ("mid_early", 32, 64),
+    ("mid_late", 64, 96),
+    ("late", 96, 128),
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +121,45 @@ def compute_activation_norms(residual_states: List[torch.Tensor]) -> np.ndarray:
         mean_norm = torch.linalg.norm(flattened, dim=1).mean()
         values.append(float(mean_norm.item()))
     return np.asarray(values, dtype=np.float32)
+
+
+def compute_exp5_position_metrics(residual_states_raw: List[torch.Tensor]) -> Dict[str, np.ndarray]:
+    """Returns experiment-5 cosine metrics stratified by token groups and individual positions."""
+    n_layers = len(residual_states_raw)
+    block_size = int(residual_states_raw[0].shape[1])
+
+    valid_groups: List[Tuple[str, int, int]] = []
+    for name, start, end in EXP5_POSITION_GROUPS:
+        if start >= block_size:
+            continue
+        valid_groups.append((name, start, min(end, block_size)))
+
+    mean_cosine_by_group = np.zeros((n_layers, len(valid_groups)), dtype=np.float32)
+    mean_cosine_by_position = np.zeros((n_layers, block_size), dtype=np.float32)
+
+    for layer_idx, state in enumerate(residual_states_raw):
+        state_cpu = state.detach().cpu().float()
+
+        for group_idx, (_, start, end) in enumerate(valid_groups):
+            group = state_cpu[:, start:end, :].reshape(-1, state_cpu.shape[-1])
+            group_centered = group - group.mean(dim=0, keepdim=True)
+            mean_cosine_by_group[layer_idx, group_idx] = float(
+                mean_cosine_sim(group_centered, num_pairs=EXP5_COSINE_PAIRS, seed=CKA_SEED)
+            )
+
+        for position in range(block_size):
+            vectors = state_cpu[:, position, :]
+            vectors_centered = vectors - vectors.mean(dim=0, keepdim=True)
+            mean_cosine_by_position[layer_idx, position] = float(
+                mean_cosine_sim(vectors_centered, num_pairs=EXP5_COSINE_PAIRS, seed=CKA_SEED)
+            )
+
+    labels = np.asarray([name for name, _, _ in valid_groups], dtype="<U32")
+    return {
+        "mean_cosine_by_group": mean_cosine_by_group,
+        "mean_cosine_by_position": mean_cosine_by_position,
+        "position_group_labels": labels,
+    }
 
 
 def aggregate_metric_dicts(metric_dicts: List[dict]) -> Dict[str, np.ndarray]:
@@ -271,6 +317,9 @@ def measure(args: argparse.Namespace) -> None:
         results["novelty_mlp"] = np.asarray(novelty_mlp, dtype=np.float32)
         results["novelty_frac_attn"] = np.asarray(novelty_frac_attn, dtype=np.float32)
         results["novelty_frac_mlp"] = np.asarray(novelty_frac_mlp, dtype=np.float32)
+
+    if args.exp_name.startswith("exp5"):
+        results.update(compute_exp5_position_metrics(residual_states_raw))
 
     output_path = make_output_path(args.out_dir, args.exp_name, args.seed, int(checkpoint["step"]))
     np.savez(output_path, **results)
